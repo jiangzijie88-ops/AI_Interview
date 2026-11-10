@@ -1,6 +1,9 @@
 import httpx
 import streamlit as st
 
+from question_admin import show_question_admin
+from interview import show_interview_create, show_interview_list
+
 # 后端地址，集中写在这里，方便以后修改
 API_URL = "http://127.0.0.1:8000"
 
@@ -11,9 +14,21 @@ st.title("AI 面试平台")
 if "token" not in st.session_state:
     st.session_state.token = None
 
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "home"
+
+
+def clear_login():
+    """退出时同时清理页面、用户信息和练习草稿，避免下个账号沿用。"""
+    st.session_state.clear()
+    st.session_state.token = None
+    st.session_state.current_page = "home"
+
 
 # 没有 token 时，显示登录表单
 if st.session_state.token is None:
+    # 登录过期后重新登录，也从练习首页进入
+    st.session_state.current_page = "home"
     with st.form("login_form"):
         username = st.text_input("用户名")
 
@@ -122,73 +137,98 @@ if st.session_state.token is None:
                     st.error("无法连接后端，请确认后端已启动")
 
 
-# 已有 token 时，显示用户信息和退出按钮
+# 已登录时，通过页面状态在练习首页和我的主页之间切换
 else:
-    st.success("已保存登录凭证")
-
-    if st.button("查看我的信息"):
-        try:
-            # 在请求头中携带 token，让后端识别当前用户
-            response = httpx.get(
-                f"{API_URL}/users/me",
-                headers={
-                    "Authorization": f"Bearer {st.session_state.token}",
-                },
-                timeout=10.0,
-            )
-
-            if response.status_code == 200:
-                user = response.json()
-                st.write("用户名：", user["username"])
-                st.write("昵称：", user["nickname"])
-            elif response.status_code == 401:
-                # token 已过期或无效，清除后重新显示登录表单
-                st.session_state.token = None
+    # 首页只保留个人主页入口，账号操作集中放在个人主页
+    _, navigation = st.columns([3, 1])
+    with navigation:
+        if st.session_state.current_page == "home":
+            if st.button("我的主页", use_container_width=True):
+                st.session_state.current_page = "profile"
                 st.rerun()
-            else:
-                st.error(f"获取用户信息失败：{response.status_code}")
+        else:
+            if st.button("返回首页", use_container_width=True):
+                st.session_state.current_page = "home"
+                st.rerun()
 
-        except httpx.RequestError:
-            st.error("无法连接后端，请稍后重试")
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    current_user = None
 
-    # 已登录用户可以修改自己的昵称
-    with st.form("nickname_form"):
-        new_nickname = st.text_input(
-            "新昵称",
-            max_chars=20,
-            help="留空可以清空昵称",
+    # 复用现有接口：个人主页显示资料，首页判断管理员权限
+    try:
+        response = httpx.get(
+            f"{API_URL}/users/me",
+            headers=headers,
+            timeout=10.0,
         )
-        nickname_submitted = st.form_submit_button("保存昵称")
 
-    if nickname_submitted:
-        try:
-            # 携带 token，提交新昵称
-            response = httpx.patch(
-                f"{API_URL}/users/me",
-                headers={
-                    "Authorization": f"Bearer {st.session_state.token}",
-                },
-                json={"nickname": new_nickname},
-                timeout=10.0,
-            )
+        if response.status_code == 200:
+            current_user = response.json()
+        elif response.status_code == 401:
+            clear_login()
+            st.rerun()
+        else:
+            st.error(f"读取用户身份失败：{response.status_code}")
+    except httpx.RequestError:
+        st.error("无法连接后端，请稍后重试")
 
-            if response.status_code == 200:
-                data = response.json()
-                st.success(data["message"])
-                st.write("当前昵称：", data["nickname"])
-            elif response.status_code == 401:
-                # 登录凭证失效，返回登录页面
-                st.session_state.token = None
-                st.rerun()
-            elif response.status_code == 422:
-                st.error("昵称不能超过 20 个字符")
-            else:
-                st.error(f"修改失败，状态码：{response.status_code}")
+    if st.session_state.current_page == "profile":
+        st.subheader("我的主页")
 
-        except httpx.RequestError:
-            st.error("无法连接后端，请稍后重试")
+        notice = st.session_state.pop("profile_notice", None)
+        if notice:
+            st.success(notice)
 
-    if st.button("退出登录"):
-        # 清除当前页面保存的 token
-        st.session_state.token = None
-        st.rerun()
+        if current_user is not None:
+            # 进入个人主页就读取并显示信息，无需再点击查询按钮
+            st.write("用户名：", current_user["username"])
+            st.write("昵称：", current_user["nickname"] or "未设置")
+
+            with st.form("nickname_form"):
+                new_nickname = st.text_input(
+                    "新昵称",
+                    value=current_user["nickname"] or "",
+                    max_chars=20,
+                    help="留空可以清空昵称",
+                )
+                nickname_submitted = st.form_submit_button("保存昵称")
+
+            if nickname_submitted:
+                try:
+                    response = httpx.patch(
+                        f"{API_URL}/users/me",
+                        headers=headers,
+                        json={"nickname": new_nickname},
+                        timeout=10.0,
+                    )
+
+                    if response.status_code == 200:
+                        # 重跑后重新读取个人信息，让顶部昵称同步更新
+                        st.session_state.profile_notice = response.json()["message"]
+                        st.rerun()
+                    elif response.status_code == 401:
+                        clear_login()
+                        st.rerun()
+                    elif response.status_code == 422:
+                        st.error("昵称不能超过 20 个字符")
+                    else:
+                        st.error(f"修改失败，状态码：{response.status_code}")
+                except httpx.RequestError:
+                    st.error("无法连接后端，请稍后重试")
+
+        st.divider()
+        # 后端暂时不可连接时，也允许清除本机登录状态
+        if st.button("退出登录"):
+            clear_login()
+            st.rerun()
+
+    else:
+        # 练习首页只显示练习功能，以及管理员的题库区域
+        st.divider()
+        show_interview_create(API_URL, st.session_state.token)
+
+        st.divider()
+        show_interview_list(API_URL, st.session_state.token)
+
+        if current_user is not None and current_user["role"] == "admin":
+            show_question_admin(API_URL, st.session_state.token)
