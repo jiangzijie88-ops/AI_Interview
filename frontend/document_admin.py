@@ -1,10 +1,10 @@
+from ui import page_heading, status_label
 import httpx
 import streamlit as st
 
 
 def show_document_admin(api_url: str, token: str):
-    st.divider()
-    st.subheader("资料管理")
+    page_heading("资料管理", "从可信资料到检索依据：导入、审核，再建立索引。")
 
     # 取出上一次保存后的提示，显示一次后移除
     notice = st.session_state.pop("document_notice", None)
@@ -14,6 +14,16 @@ def show_document_admin(api_url: str, token: str):
     # 每个请求都携带登录凭证，供后端验证管理员身份
     headers = {"Authorization": f"Bearer {token}"}
 
+    section = st.radio("资料工作区", ["资料列表", "新增与导入", "索引与检索"], horizontal=True, key="document_admin_section")
+    if section == "新增与导入":
+        _show_document_create(api_url, token, headers)
+    elif section == "索引与检索":
+        _show_document_tools(api_url, token, headers)
+    else:
+        _show_document_list(api_url, token, headers)
+
+
+def _show_document_tools(api_url, token, headers):
     with st.expander("资料索引"):
         st.caption("资料新增、修改或审核状态变化后，需要重新建立索引。")
 
@@ -101,7 +111,8 @@ def show_document_admin(api_url: str, token: str):
                                     f"检索距离：{distance:.4f}（越小越接近）"
                                 )
 
-                            st.text(item["content"])
+                            with st.expander("查看片段正文"):
+                                st.text(item["content"])
 
                             # 纯文本显示来源，避免直接拼接成 Markdown
                             st.write(
@@ -120,6 +131,9 @@ def show_document_admin(api_url: str, token: str):
                 except httpx.RequestError:
                     st.error("请求未成功完成，请稍后重试")
 
+
+
+def _show_document_create(api_url, token, headers):
     # 收起表单，避免正文输入框占据太多页面空间
     with st.expander("新增参考资料"):
         with st.form("document_create_form", clear_on_submit=False):
@@ -205,6 +219,9 @@ def show_document_admin(api_url: str, token: str):
                 except httpx.RequestError:
                     st.error("请求未成功完成，请先检查资料列表，确认是否已保存")
 
+
+
+def _show_document_list(api_url, token, headers):
     page = st.number_input(
         "资料列表页码",
         min_value=1,
@@ -249,10 +266,13 @@ def show_document_admin(api_url: str, token: str):
         return
 
     # 将资料概要显示为表格
+    rows = [{"编号": item["id"], "标题": item["title"],
+             "状态": status_label(item["status"]), "修订号": item["revision"],
+             "版本说明": item["version_note"] or "未填写"} for item in data["items"]]
     st.dataframe(
-        data["items"],
+        rows,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     # 建立“资料编号 → 资料标题”的对应关系
@@ -305,7 +325,7 @@ def show_document_admin(api_url: str, token: str):
     document = response.json()
 
     st.subheader(document["title"])
-    st.write("状态：", document["status"])
+    st.write("状态：", status_label(document["status"]))
     st.write("修订号：", document["revision"])
     st.write("来源链接：", document["source_url"] or "未填写")
     st.write("版本说明：", document["version_note"] or "未填写")
@@ -313,7 +333,8 @@ def show_document_admin(api_url: str, token: str):
     st.markdown("**资料正文**")
 
     # 按纯文本显示正文，保留换行，不将资料内容当成页面 Markdown
-    st.text(document["content"])
+    with st.expander("查看完整正文"):
+        st.text(document["content"])
 
     with st.expander("资料切分预览"):
         st.caption("预览数据库中已保存的正文，不保存片段，也不调用大模型。")

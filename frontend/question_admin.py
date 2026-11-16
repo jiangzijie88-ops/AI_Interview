@@ -1,3 +1,4 @@
+from ui import page_heading, difficulty_label, status_label
 import httpx
 import streamlit as st
 import json
@@ -5,7 +6,7 @@ import json
 
 # 显示题目管理区域，由 app.py 调用
 def show_question_admin(api_url, token):
-    st.subheader("题库管理")
+    page_heading("题库管理", "维护题目内容与状态，审核后用于组题。")
 
     try:
         # 先读取选项，供筛选、新增和编辑表单共同使用
@@ -33,17 +34,35 @@ def show_question_admin(api_url, token):
         st.error("岗位或知识点加载失败")
         return
 
+    section = st.radio("题库工作区", ["浏览与维护", "新增题目", "批量导入"], horizontal=True, key="question_admin_section")
+    if section == "新增题目":
+        _show_question_create(api_url, token, jobs, points)
+    elif section == "批量导入":
+        show_question_import(api_url, token)
+    else:
+        action = st.radio("维护操作", ["题目列表", "详情与审核", "编辑题目"], horizontal=True, key="question_admin_action")
+        if action == "题目列表":
+            _show_question_list(api_url, token, jobs, points)
+        elif action == "编辑题目":
+            show_question_editor(api_url, token, jobs, points)
+        else:
+            _show_question_detail(api_url, token, jobs, points)
+            with st.expander("审核与停用"):
+                _show_question_status(api_url, token, jobs, points)
+
+def _show_question_list(api_url, token, jobs, points):
     # 表单提交时，再统一查询
     with st.form("question_list_form"):
-        difficulty = st.selectbox(
-            "难度", ["全部", "basic", "advanced"]
+        difficulty_col, status_col, job_col, point_col, page_col = st.columns([1, 1, 2, 2, 1])
+        difficulty = difficulty_col.selectbox(
+            "难度", ["全部", "basic", "advanced"], format_func=difficulty_label
         )
-        status = st.selectbox(
-            "状态", ["全部", "draft", "approved", "disabled"]
+        status = status_col.selectbox(
+            "状态", ["全部", "draft", "approved", "disabled"], format_func=status_label
         )
 
         # None 表示“全部”，其他选项是数据库中的岗位 ID
-        filter_job_id = st.selectbox(
+        filter_job_id = job_col.selectbox(
             "筛选岗位",
             options=[None] + list(jobs),
             format_func=lambda item_id: (
@@ -51,7 +70,7 @@ def show_question_admin(api_url, token):
             ),
         )
 
-        filter_point_id = st.selectbox(
+        filter_point_id = point_col.selectbox(
             "筛选知识点",
             options=[None] + list(points),
             format_func=lambda item_id: (
@@ -59,7 +78,7 @@ def show_question_admin(api_url, token):
             ),
         )
 
-        page = st.number_input("页码", min_value=1, value=1, step=1)
+        page = page_col.number_input("页码", min_value=1, value=1, step=1)
         submitted = st.form_submit_button("查询题目")
 
     if submitted:
@@ -94,7 +113,11 @@ def show_question_admin(api_url, token):
 
                 if data["items"]:
                     # 将后端返回的字典列表显示成表格
-                    st.dataframe(data["items"], hide_index=True)
+                    rows = [{"编号": item["id"], "题目": item["content"],
+                             "难度": difficulty_label(item["difficulty"]),
+                             "状态": status_label(item["status"]), "修订号": item["revision"]}
+                            for item in data["items"]]
+                    st.dataframe(rows, hide_index=True, width="stretch")
                 else:
                     st.info("当前页没有题目")
 
@@ -109,7 +132,9 @@ def show_question_admin(api_url, token):
         except httpx.RequestError:
             st.error("无法连接后端，请稍后重试")
         # 分隔题目列表和详情区域
-    st.divider()
+
+
+def _show_question_detail(api_url, token, jobs, points):
     st.write("查看题目详情")
 
     with st.form("question_detail_form"):
@@ -136,8 +161,8 @@ def show_question_admin(api_url, token):
 
                 # 用 write 展示纯文本，避免把题目里的代码当作 Markdown
                 st.write("题目：", question["content"])
-                st.write("难度：", question["difficulty"])
-                st.write("状态：", question["status"])
+                st.write("难度：", difficulty_label(question["difficulty"]))
+                st.write("状态：", status_label(question["status"]))
                 st.write("修订号：", question["revision"])
 
                 st.write("参考要点：", question["reference_points"])
@@ -169,7 +194,8 @@ def show_question_admin(api_url, token):
         except httpx.RequestError:
             st.error("无法连接后端，请稍后重试")
 
-    st.divider()
+
+def _show_question_status(api_url, token, jobs, points):
     st.write("审核与停用")
 
     # 页面显示中文，提交给后端时转换为约定的英文值
@@ -228,7 +254,8 @@ def show_question_admin(api_url, token):
             except httpx.RequestError:
                 st.error("无法连接后端，请稍后重试")
 
-    st.divider()
+
+def _show_question_create(api_url, token, jobs, points):
     st.write("新增题目")
 
     if not jobs or not points:
@@ -241,7 +268,7 @@ def show_question_admin(api_url, token):
         new_reference = st.text_area("参考要点", max_chars=1000)
 
         new_difficulty = st.selectbox(
-            "题目难度", ["basic", "advanced"]
+            "题目难度", ["basic", "advanced"], format_func=difficulty_label
         )
 
         # 实际选择的是 ID，页面通过 format_func 显示名称
@@ -302,15 +329,7 @@ def show_question_admin(api_url, token):
             except httpx.RequestError:
                 st.error("无法连接后端，请稍后重试")
 
-    # 复用前面已经获取的岗位和知识点选项
-    st.divider()
 
-    # 勾选后才加载编辑区域，避免每次都查询题目
-    if st.checkbox("打开题目编辑"):
-        show_question_editor(api_url, token, jobs, points)
-    # 独立显示批量导入区域
-    st.divider()
-    show_question_import(api_url, token)
 
 
 def show_question_editor(api_url, token, jobs, points):

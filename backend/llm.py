@@ -48,28 +48,5 @@ def get_embedding_model():
 
 
 
-if __name__ == "__main__":
-    import asyncio
-
-    async def main():
-        # 创建客户端，此时还没有发送请求
-        embedding_model = get_embedding_model()
-
-        text = "LangGraph 的节点可以返回状态的部分更新。"
-
-        # 真正发送请求，将一段文字转换为向量
-        vector = await embedding_model.aembed_query(text)
-
-        print("向量生成成功")
-        print("向量维度：", len(vector))
-        print("前 5 个数值：", vector[:5])
-
-    # 启动异步函数
-    asyncio.run(main())
-
-
-
-
-
 
 

@@ -1,157 +1,140 @@
+import os
 import httpx
 import streamlit as st
 
+from ui import setup_page, page_heading
 from question_admin import show_question_admin
 from document_admin import show_document_admin
-from interview import show_interview_create, show_interview_list
+from interview import show_interview_create, show_interview_list, show_current_interview
 
-# 后端地址，集中写在这里，方便以后修改
-API_URL = "http://127.0.0.1:8000"
-
-st.title("AI 面试平台")
-
-# Streamlit 交互时会重新运行脚本
-# session_state 用来保存当前页面会话中的登录状态
-if "token" not in st.session_state:
-    st.session_state.token = None
-
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "home"
+setup_page()
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+st.session_state.setdefault("token", None)
+st.session_state.setdefault("current_page", "home")
 
 
 def clear_login():
-    """退出时同时清理页面、用户信息和练习草稿，避免下个账号沿用。"""
+    """退出后清理身份、导航和所有练习草稿。"""
     st.session_state.clear()
     st.session_state.token = None
     st.session_state.current_page = "home"
 
 
-# 没有 token 时，显示登录表单
 if st.session_state.token is None:
-    # 登录过期后重新登录，也从练习首页进入
     st.session_state.current_page = "home"
-    with st.form("login_form"):
-        username = st.text_input("用户名")
+    _, center, _ = st.columns([1, 1.4, 1])
+    with center:
+        page_heading("AI 面试平台", "按知识点练习，在回答中发现进步。")
+        auth_mode = st.radio("账号入口", ["登录", "注册"], horizontal=True, label_visibility="collapsed")
+        if auth_mode == "登录":
+            with st.form("login_form"):
+                username = st.text_input("用户名")
 
-        # type="password"：隐藏输入内容
-        password = st.text_input("密码", type="password")
+                # type="password"：隐藏输入内容
+                password = st.text_input("密码", type="password")
 
-        # 表单内的输入集中在点击此按钮后提交
-        submitted = st.form_submit_button("登录")
+                # 表单内的输入集中在点击此按钮后提交
+                submitted = st.form_submit_button("登录")
 
-    if submitted:
-        try:
-            # 发送登录请求，json 参数会把字典作为 JSON 请求体
-            response = httpx.post(
-                f"{API_URL}/users/login",
-                json={
-                    "username": username,
-                    "password": password,
-                },
-                timeout=10.0,
-            )
-
-            if response.status_code == 200:
-                # 你的后端返回字段名是 token
-                st.session_state.token = response.json()["token"]
-
-                # 重新运行页面，进入已登录分支
-                st.rerun()
-            elif response.status_code == 401:
-                st.error("用户名或密码错误")
-            elif response.status_code == 422:
-                st.error("请检查用户名和密码长度")
-            else:
-                st.error(f"登录失败，状态码：{response.status_code}")
-
-        except httpx.RequestError:
-            st.error("无法连接后端，请确认后端已启动")
-
-    # 未登录时，允许展开注册区域
-    with st.expander("没有账号？点击注册"):
-        with st.form("register_form"):
-            # key 用来区分注册和登录表单中的同名输入框
-            register_username = st.text_input(
-                "用户名",
-                max_chars=20,
-                key="register_username",
-            )
-
-            register_password = st.text_input(
-                "密码",
-                type="password",
-                max_chars=20,
-                help="请输入 6～20 个字符",
-                key="register_password",
-            )
-
-            confirm_password = st.text_input(
-                "确认密码",
-                type="password",
-                max_chars=20,
-                key="register_confirm_password",
-            )
-
-            register_nickname = st.text_input(
-                "昵称",
-                max_chars=20,
-                key="register_nickname",
-            )
-
-            register_submitted = st.form_submit_button("注册")
-
-        # 表单提交后，再检查并发送请求
-        if register_submitted:
-            username = register_username.strip()
-
-            if not username:
-                st.error("用户名不能为空")
-            elif not 6 <= len(register_password) <= 20:
-                st.error("密码长度应为 6～20 个字符")
-            elif register_password != confirm_password:
-                st.error("两次输入的密码不一致")
-            else:
+            if submitted:
                 try:
+                    # 发送登录请求，json 参数会把字典作为 JSON 请求体
                     response = httpx.post(
-                        f"{API_URL}/users/register",
+                        f"{API_URL}/users/login",
                         json={
                             "username": username,
-                            "password": register_password,
-                            "nickname": register_nickname,
+                            "password": password,
                         },
                         timeout=10.0,
                     )
 
-                    if response.status_code == 201:
-                        st.success("注册成功，请在上方登录")
-                    elif response.status_code in (400, 409):
-                        # 显示后端返回的业务错误，例如用户名已存在
-                        st.error(response.json()["detail"])
+                    if response.status_code == 200:
+                        # 你的后端返回字段名是 token
+                        st.session_state.token = response.json()["token"]
+
+                        # 重新运行页面，进入已登录分支
+                        st.rerun()
+                    elif response.status_code == 401:
+                        st.error("用户名或密码错误")
                     elif response.status_code == 422:
-                        st.error("输入不符合要求，请检查后重试")
+                        st.error("请检查用户名和密码长度")
                     else:
-                        st.error(
-                            f"注册失败，状态码：{response.status_code}"
-                        )
+                        st.error(f"登录失败，状态码：{response.status_code}")
 
                 except httpx.RequestError:
                     st.error("无法连接后端，请确认后端已启动")
 
-
-# 已登录时，通过页面状态在练习首页和我的主页之间切换
-else:
-    # 首页只保留个人主页入口，账号操作集中放在个人主页
-    _, navigation = st.columns([3, 1])
-    with navigation:
-        if st.session_state.current_page == "home":
-            if st.button("我的主页", use_container_width=True):
-                st.session_state.current_page = "profile"
-                st.rerun()
         else:
-            if st.button("返回首页", use_container_width=True):
-                st.session_state.current_page = "home"
-                st.rerun()
+                with st.form("register_form"):
+                    # key 用来区分注册和登录表单中的同名输入框
+                    register_username = st.text_input(
+                        "用户名",
+                        max_chars=20,
+                        key="register_username",
+                    )
 
+                    register_password = st.text_input(
+                        "密码",
+                        type="password",
+                        max_chars=20,
+                        help="请输入 6～20 个字符",
+                        key="register_password",
+                    )
+
+                    confirm_password = st.text_input(
+                        "确认密码",
+                        type="password",
+                        max_chars=20,
+                        key="register_confirm_password",
+                    )
+
+                    register_nickname = st.text_input(
+                        "昵称",
+                        max_chars=20,
+                        key="register_nickname",
+                    )
+
+                    register_submitted = st.form_submit_button("注册")
+
+                # 表单提交后，再检查并发送请求
+                if register_submitted:
+                    username = register_username.strip()
+
+                    if not username:
+                        st.error("用户名不能为空")
+                    elif not 6 <= len(register_password) <= 20:
+                        st.error("密码长度应为 6～20 个字符")
+                    elif register_password != confirm_password:
+                        st.error("两次输入的密码不一致")
+                    else:
+                        try:
+                            response = httpx.post(
+                                f"{API_URL}/users/register",
+                                json={
+                                    "username": username,
+                                    "password": register_password,
+                                    "nickname": register_nickname,
+                                },
+                                timeout=10.0,
+                            )
+
+                            if response.status_code == 201:
+                                st.success("注册成功，请在上方登录")
+                            elif response.status_code in (400, 409):
+                                # 显示后端返回的业务错误，例如用户名已存在
+                                st.error(response.json()["detail"])
+                            elif response.status_code == 422:
+                                st.error("输入不符合要求，请检查后重试")
+                            else:
+                                st.error(
+                                    f"注册失败，状态码：{response.status_code}"
+                                )
+
+                        except httpx.RequestError:
+                            st.error("无法连接后端，请确认后端已启动")
+
+
+else:
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
     current_user = None
 
@@ -173,7 +156,31 @@ else:
     except httpx.RequestError:
         st.error("无法连接后端，请稍后重试")
 
-    if st.session_state.current_page == "profile":
+    # 每轮读取服务端身份，管理入口不信任客户端保存的角色。
+    with st.sidebar:
+        st.markdown("## AI 面试平台")
+        if current_user is not None:
+            st.caption(current_user.get("nickname") or current_user["username"])
+        st.caption("练习工作台")
+        pages = [("开始练习", "home"), ("我的练习", "sessions"), ("我的主页", "profile")]
+        if current_user is not None and current_user["role"] == "admin":
+            pages += [("题库管理", "questions"), ("资料管理", "documents")]
+        for label, name in pages:
+            if name == "questions":
+                st.divider()
+                st.caption("管理中心")
+            active = st.session_state.current_page == name or (
+                name == "sessions" and st.session_state.current_page == "practice"
+            )
+            if st.button(label, key=f"nav_{name}", width="stretch",
+                         type="primary" if active else "secondary"):
+                st.session_state.current_page = name
+                st.rerun()
+        st.divider()
+        st.caption("账号设置与退出登录位于「我的主页」。")
+
+    page = st.session_state.current_page
+    if page == "profile":
         st.subheader("我的主页")
 
         notice = st.session_state.pop("profile_notice", None)
@@ -223,14 +230,28 @@ else:
             clear_login()
             st.rerun()
 
-    else:
-        # 练习首页只显示练习功能，以及管理员的题库区域
-        st.divider()
-        show_interview_create(API_URL, st.session_state.token)
-
-        st.divider()
-        show_interview_list(API_URL, st.session_state.token)
-
-        if current_user is not None and current_user["role"] == "admin":
+    elif current_user is None:
+        st.info("暂时无法读取身份，请稍后刷新，或进入我的主页退出登录。")
+    elif page == "questions":
+        if current_user["role"] == "admin":
             show_question_admin(API_URL, st.session_state.token)
+        else:
+            st.warning("需要管理员权限。")
+    elif page == "documents":
+        if current_user["role"] == "admin":
             show_document_admin(API_URL, st.session_state.token)
+        else:
+            st.warning("需要管理员权限。")
+    elif page == "sessions":
+        show_interview_list(API_URL, st.session_state.token)
+    elif page == "practice":
+        if st.button("← 返回我的练习"):
+            st.session_state.current_page = "sessions"
+            st.rerun()
+        session_id = st.session_state.get("active_session_id")
+        if session_id is not None:
+            show_current_interview(API_URL, st.session_state.token, session_id)
+        else:
+            st.info("请从我的练习中选择记录。")
+    else:
+        show_interview_create(API_URL, st.session_state.token)

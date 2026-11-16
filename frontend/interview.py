@@ -1,10 +1,11 @@
+from ui import difficulty_label, page_heading
 import httpx
 import streamlit as st
 from uuid import uuid4  # 生成每次提交的唯一编号
 
 
 def show_interview_create(api_url, token):
-    st.subheader("创建面试练习")
+    page_heading("开始一场练习", "选择方向与难度，创建后即可逐题作答。")
 
     # 读取岗位和知识点，作为页面选项
     try:
@@ -34,18 +35,19 @@ def show_interview_create(api_url, token):
         return
 
     with st.form("interview_create_form"):
-        job_id = st.selectbox(
+        job_column, difficulty_column, count_column = st.columns([2, 1, 1])
+        job_id = job_column.selectbox(
             "岗位",
             options=list(jobs),
             format_func=lambda item_id: jobs[item_id],
         )
 
-        difficulty = st.selectbox(
-            "练习难度", ["basic", "advanced"]
+        difficulty = difficulty_column.selectbox(
+            "练习难度", ["basic", "advanced"], format_func=difficulty_label
         )
 
         # index=1：默认选中第二项，也就是 5 道
-        question_count = st.selectbox(
+        question_count = count_column.selectbox(
             "主问题数量", [3, 5, 10], index=1
         )
 
@@ -56,7 +58,7 @@ def show_interview_create(api_url, token):
             help="不选表示不限；选多个时，题目匹配其中任意一个即可",
         )
 
-        submitted = st.form_submit_button("创建练习")
+        submitted = st.form_submit_button("创建练习", type="primary")
 
     if submitted:
         try:
@@ -75,12 +77,9 @@ def show_interview_create(api_url, token):
             if response.status_code == 201:
                 data = response.json()
 
-                st.success(f"练习已创建，编号：{data['id']}")
-                st.write(
-                    f"当前第 {data['current_position']} 题，"
-                    f"共 {data['question_count']} 题"
-                )
-                st.write(data["current_question"]["content"])
+                st.session_state.active_session_id = data["id"]
+                st.session_state.current_page = "practice"
+                st.rerun()
 
             elif response.status_code == 400:
                 # 当前后端的题量不足信息放在 detail 字典中
@@ -113,7 +112,7 @@ def show_interview_create(api_url, token):
 
 
 def show_interview_list(api_url, token):
-    st.subheader("我的练习")
+    page_heading("我的练习", "继续未完成的练习，或回看回答、点评与总结报告。")
     # 提示显示一次后移除，避免以后每次操作都重复出现
     notice = st.session_state.pop("interview_notice", None)
     if notice is not None:
@@ -127,12 +126,13 @@ def show_interview_list(api_url, token):
     }
 
     # 放在表单外，切换条件后页面会重新运行并查询
-    selected_status = st.selectbox(
+    filter_column, page_column = st.columns([3, 1])
+    selected_status = filter_column.selectbox(
         "练习状态",
         options=list(status_options),
         key="interview_list_status",
     )
-    page = st.number_input(
+    page = page_column.number_input(
         "练习列表页码",
         min_value=1,
         value=1,
@@ -184,13 +184,13 @@ def show_interview_list(api_url, token):
         rows.append({
             "练习编号": session["id"],
             "岗位": session["job_role_name"],
-            "难度": session["difficulty"],
+            "难度": difficulty_label(session["difficulty"]),
             "主问题数量": session["question_count"],
             "状态": status_names[session["status"]],
             "开始时间（UTC）": session["started_at"],
         })
 
-    st.dataframe(rows, hide_index=True)
+    st.dataframe(rows, hide_index=True, width="stretch")
 
     # 所有状态均可打开；结束的练习仅查看历史题目和回答
     sessions = {
@@ -213,8 +213,10 @@ def show_interview_list(api_url, token):
         key="continue_interview_id",
     )
 
-    if selected_id is not None:
-        show_current_interview(api_url, token, selected_id)
+    if st.button("打开练习", type="primary", disabled=selected_id is None):
+        st.session_state.active_session_id = selected_id
+        st.session_state.current_page = "practice"
+        st.rerun()
 
 
 def save_answer_draft(widget_key, draft_key):
@@ -223,8 +225,7 @@ def save_answer_draft(widget_key, draft_key):
 
 
 def show_current_interview(api_url, token, session_id):
-    st.divider()
-    st.subheader(f"练习详情：{session_id}")
+    page_heading(f"练习 #{session_id}", "点击题号自由切换，提交后查看 AI 点评。")
     position_key = f"interview_position_{session_id}"
     if position_key not in st.session_state:
         st.session_state[position_key] = 1
@@ -257,8 +258,11 @@ def show_current_interview(api_url, token, session_id):
 
     # 每个题号旁标注作答状态，切换只改变页面选择，不修改数据库
     st.write(f"已回答 {data['answered_count']} / {data['question_count']} 道")
-    columns = st.columns(len(data["questions"]))
-    for column, item in zip(columns, data["questions"]):
+    st.progress(data["answered_count"] / max(data["question_count"], 1))
+    # 每行最多五个题号，十道题也不会挤成一排。
+    columns = st.columns(min(len(data["questions"]), 5))
+    for index, item in enumerate(data["questions"]):
+        column = columns[index % len(columns)]
         label = f"{item['position']} {'已答' if item['answered'] else '未答'}"
         if column.button(
             label,
@@ -356,7 +360,7 @@ def show_current_interview(api_url, token, session_id):
         args=(widget_key, draft_key),
     )
     st.caption("切换题号可保留当前页面会话中的草稿；刷新或关闭页面后不保证恢复。点击提交后才保存到数据库。")
-    if not st.button("提交本题回答", key=f"submit_{answer_key}"):
+    if not st.button("提交本题回答", key=f"submit_{answer_key}", type="primary"):
         return
     if not content.strip():
         st.warning("请先填写回答")
