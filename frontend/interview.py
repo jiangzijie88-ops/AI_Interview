@@ -483,6 +483,61 @@ def show_answer_feedback(
             else:
                 for item in items:
                     st.write("•", item)
+        # 目前只有主点评接入了资料检
+        # 当前只有主点评接入资料检索，追问点评暂不展示
+        if not is_followup:
+            sources = content.get("reference_sources", [])
+
+            st.markdown("**本次提供给 AI 的参考资料**")
+            # 读取点评生成时保存的检索状态，不重新发起检索
+            retrieval_status = content.get("retrieval_status")
+            retrieval_note = content.get("retrieval_note")
+
+            if retrieval_status == "succeeded":
+                st.caption("已向 AI 提供检索参考片段。")
+            elif retrieval_status == "empty":
+                st.info(
+                    retrieval_note
+                    or "未找到符合条件的片段，本次根据题目和参考要点评价。"
+                )
+            elif retrieval_status == "failed":
+                st.warning(
+                    retrieval_note
+                    or "资料检索暂不可用，本次根据题目和参考要点评价。"
+                )
+
+            if not sources:
+                # 兼容没有检索状态字段的旧点评
+                if retrieval_status is None:
+                    st.caption("本次点评未记录检索参考资料。")
+            else:
+                st.caption(
+                    "以下为生成点评时提供的候选片段，"
+                    "不代表 AI 使用了全部片段，也不保证每段都与问题相关。"
+                )
+
+                for source in sources:
+                    with st.expander(
+                        f"[资料{source['number']}] {source['title']}"
+                    ):
+                        st.caption(
+                            f"资料编号：{source['document_id']} · "
+                            f"修订号：{source['revision']} · "
+                            f"片段：{source['position']}"
+                        )
+
+                        st.write(
+                            "来源链接：",
+                            source.get("source_url") or "未填写",
+                        )
+
+                        st.write(
+                            "版本说明：",
+                            source.get("version_note") or "未填写",
+                        )
+
+                        # 显示点评生成时保存的片段，避免混入后来修改的正文
+                        st.text(source["content"])
         # 主点评成功后显示追问，追问点评后不再继续追问
         if not is_followup:
             show_answer_followup(api_url, token, answer_id, session_id)

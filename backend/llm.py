@@ -1,7 +1,7 @@
 import os 
 from pathlib import Path
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
 # 明确读取项目根目录的 .env ，不依赖其他文件先加载配置
@@ -24,6 +24,50 @@ def get_chat_model():
     # 暂不自动重试，后续由点评业务明确处理失败
     max_retries=0,
   )
+
+
+
+def get_embedding_model():
+  """创建用于资料和问题向量化的客户端。"""
+
+  return OpenAIEmbeddings(
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url=os.getenv("LLM_BASE_URL"),
+    model=os.getenv("EMBEDDING_MODEL"),
+    # 直接发送原始文本，由阿里云处理文本长度
+    check_embedding_ctx_length=False,
+    # 先每次提交一条文本，保持调用简单
+    chunk_size=1,
+    request_timeout=60,
+    max_retries=0,
+  )
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        # 创建客户端，此时还没有发送请求
+        embedding_model = get_embedding_model()
+
+        text = "LangGraph 的节点可以返回状态的部分更新。"
+
+        # 真正发送请求，将一段文字转换为向量
+        vector = await embedding_model.aembed_query(text)
+
+        print("向量生成成功")
+        print("向量维度：", len(vector))
+        print("前 5 个数值：", vector[:5])
+
+    # 启动异步函数
+    asyncio.run(main())
+
+
 
 
 

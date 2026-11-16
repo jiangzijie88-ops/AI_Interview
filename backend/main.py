@@ -63,6 +63,17 @@ from backend.schemas.interview_workflow import (
 
 from backend.models.interview_reports import InterviewReport
 from backend.services.interview_report_manager import ensure_report
+from backend.models.knowledge_documents import KnowledgeDocument
+from backend.schemas.knowledge_documents import (
+    KnowledgeDocumentCreate,
+    KnowledgeDocumentStatusUpdate,
+    KnowledgeDocumentUpdate,
+)
+from backend.services.document_splitter import split_document
+from backend.services.document_index import (
+    rebuild_document_index,
+    search_documents,
+)
 
 
 
@@ -1807,3 +1818,268 @@ async def get_interview_report(
 
 
 
+@app.post("/knowledge_documents", tags=["资料管理"], summary="管理员新增参考资料",status_code=201)
+async def create_knowledge_document(
+    data: KnowledgeDocumentCreate,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),   
+):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 新资料默认是草稿，不直接参与后续检索
+    document = KnowledgeDocument(
+        content=data.content,
+        source_url=data.source_url,
+        title=data.title,
+        version_note=data.version_note,
+        status="draft",
+        revision=1,
+        created_at=now,
+        updated_at=now,
+    )
+    # add登记待保存对象，commit真正提交数据库
+    db.add(document)
+    await db.commit()
+    return {
+        "id": document.id,
+        "title": document.title,
+        "status": document.status,
+        "revision": document.revision,
+        "message":"资料已保存为草稿"
+    }
+    
+
+
+@app.get("/knowledge_documents", tags=["资料管理"], summary="管理员查询参考资料")
+async def list_knowledge_documents(
+    page:int = Query(default=1, ge=1),
+    page_size:int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    # 查询资料总数，用于前端显示数量和分页
+    total = await db.scalar(
+        select(func.count()).select_from(KnowledgeDocument)
+    )
+    # 按编号倒序查询，最新添加的资料排在前面
+    result = await db.execute(
+        select(KnowledgeDocument)
+        .order_by(KnowledgeDocument.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    documents = result.scalars().all()
+    # 列表只返回摘要，正文通过详情接口获取
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": document.id,
+                "title": document.title,
+                "status": document.status,
+                "revision": document.revision,
+                "version_note": document.version_note,
+            }
+            for document in documents
+        ],
+    }
+
+
+@app.get(
+    "/knowledge_documents/search",
+    tags=["资料管理"],
+    summary="管理员检索参考资料",
+)
+async def search_knowledge_documents(
+    query: str = Query(min_length=1, max_length=500),
+    k: int = Query(default=3, ge=1, le=10),
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    try:
+        documents = await search_documents(db, query, k)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("资料检索失败")
+        raise HTTPException(
+            status_code=502,
+            detail="资料检索失败，请查看后端日志",
+        )
+
+    # 将 LangChain Document 转成接口返回的字典
+    return {
+        "query": query,
+        "count": len(documents),
+        "items": [
+            {
+                "content": document.page_content,
+                "metadata": document.metadata,
+            }
+            for document in documents
+        ],
+    }
+
+
+@app.get(
+    "/knowledge_documents/{document_id}",
+    tags=["资料管理"],
+    summary="管理员查看资料详情",
+)
+async def get_knowledge_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    # 根据主键查找一份资料
+    document = await db.get(KnowledgeDocument, document_id)
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+
+    # 详情接口返回完整正文和来源信息
+    return {
+        "id": document.id,
+        "title": document.title,
+        "content": document.content,
+        "source_url": document.source_url,
+        "version_note": document.version_note,
+        "status": document.status,
+        "revision": document.revision,
+        "created_at": document.created_at,
+        "updated_at": document.updated_at,
+    }
+
+
+
+@app.patch(
+    "/knowledge_documents/{document_id}/status",
+    tags=["资料管理"],
+    summary="管理员修改资料状态",
+)
+async def update_knowledge_document_status(
+    document_id: int,
+    data: KnowledgeDocumentStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    # 先根据资料编号找到对应的数据库记录
+    document = await db.get(KnowledgeDocument, document_id)
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+
+    # 状态确实发生变化时，才修改记录
+    if document.status != data.status:
+        document.status = data.status
+        document.revision += 1
+        document.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # 将修改提交到数据库
+        await db.commit()
+
+    return {
+        "id": document.id,
+        "title": document.title,
+        "status": document.status,
+        "revision": document.revision,
+    }
+
+
+@app.put(
+    "/knowledge_documents/{document_id}",
+    tags=["资料管理"],
+    summary="管理员编辑资料",
+)
+async def update_knowledge_document(
+    document_id: int,
+    data: KnowledgeDocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    # 查找要修改的资料
+    document = await db.get(KnowledgeDocument, document_id)
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+
+    # 用提交的完整内容更新资料
+    document.title = data.title
+    document.content = data.content
+    document.source_url = data.source_url
+    document.version_note = data.version_note
+
+    # 修改后重新进入草稿状态，等待审核
+    document.status = "draft"
+    document.revision += 1
+    document.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    await db.commit()
+
+    return {
+        "id": document.id,
+        "title": document.title,
+        "status": document.status,
+        "revision": document.revision,
+        "message": "资料已修改，请重新审核",
+    }
+
+
+@app.get(
+    "/knowledge_documents/{document_id}/chunks",
+    tags=["资料管理"],
+    summary="管理员预览资料切分结果",
+)
+async def preview_document_chunks(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    # 从数据库读取完整资料
+    document = await db.get(KnowledgeDocument, document_id)
+
+    if document is None:
+        raise HTTPException(status_code=404, detail="资料不存在")
+
+    # 调用切分服务，返回字符串列表
+    chunks = split_document(document.content)
+
+    return {
+        "document_id": document.id,
+        "title": document.title,
+        "revision": document.revision,
+        "chunk_count": len(chunks),
+        "chunks": [
+            {
+                "position": position,
+                "character_count": len(chunk),
+                "content": chunk,
+            }
+            for position, chunk in enumerate(chunks, start=1)
+        ],
+    }
+
+
+
+@app.post(
+    "/knowledge_documents/index/rebuild",
+    tags=["资料管理"],
+    summary="管理员重建资料索引",
+)
+async def rebuild_knowledge_index(
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(get_admin_user),
+):
+    try:
+        # 具体业务交给 service，接口只负责调用和返回
+        result = await rebuild_document_index(db)
+    except ValueError as exc:
+        # 例如：没有已审核资料
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("重建资料索引失败")
+        raise HTTPException(
+            status_code=502,
+            detail="索引建立失败，请查看后端日志",
+        )
+
+    return result

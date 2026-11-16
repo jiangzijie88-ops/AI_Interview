@@ -2,6 +2,7 @@ import httpx
 import streamlit as st
 
 from question_admin import show_question_admin
+from document_admin import show_document_admin
 from interview import show_interview_create, show_interview_list
 
 # 后端地址，集中写在这里，方便以后修改
@@ -232,3 +233,4 @@ else:
 
         if current_user is not None and current_user["role"] == "admin":
             show_question_admin(API_URL, st.session_state.token)
+            show_document_admin(API_URL, st.session_state.token)
