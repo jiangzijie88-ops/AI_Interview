@@ -140,13 +140,13 @@ AI_Interview/
 │   ├── interview_checkpoints.sqlite
 │   └── knowledge_index/        # index.faiss、index.pkl、config.json
 ├── .env                        # 本机配置，不提交 Git
-├── AI_Interview_Requirements.md
+├── requirements.txt            # Python 依赖及版本
 └── README.md
 ```
 
 ## 本地运行
 
-以下以 **Windows PowerShell + Conda** 为例。当前未提供 Docker 配置和锁定版本的依赖清单。
+以下以 **Windows PowerShell + Conda** 为例。Python 依赖统一记录在根目录的 [`requirements.txt`](requirements.txt)，当前未提供 Docker 配置。
 
 ### 1. 获取项目与创建环境
 
@@ -162,10 +162,12 @@ conda activate aiinterview
 ### 2. 安装依赖
 
 ```powershell
-python -m pip install fastapi "uvicorn[standard]" streamlit httpx sqlalchemy aiomysql cryptography python-dotenv "pwdlib[argon2]" PyJWT pydantic langchain-openai langchain-community langchain-text-splitters langgraph langgraph-checkpoint-sqlite aiosqlite faiss-cpu
+python -m pip install -r requirements.txt
 ```
 
-命令根据代码使用的包整理，未锁定版本，尚未在全新环境重装验证。不同依赖版本可能需要调整，请使用独立环境。
+下载或克隆项目后，在已激活的 `aiinterview` 环境中执行上述命令，即可统一安装清单中的依赖，无需逐个安装。清单固定了当前开发环境的直接依赖版本，间接依赖由 pip 解析；尚未在全新环境完整重装验证。
+
+`requirements.txt` 只包含 Python 包，MySQL 服务和模型 API 配置仍需按下面步骤准备。安装后可执行 `python -m pip check` 检查依赖冲突。
 
 ### 3. 配置 `.env`
 
@@ -328,7 +330,7 @@ INSERT INTO knowledge_points (id, name) VALUES
 
 | 现象 | 优先检查 |
 | --- | --- |
-| `No module named uvicorn` 等缺包错误 | 是否激活正确环境，使用对应 `python -m pip install ...` |
+| `No module named uvicorn` 等缺包错误 | 激活正确环境，在根目录执行 `python -m pip install -r requirements.txt` |
 | 无法导入 `backend.main` | 是否位于根目录；启动参数为 `backend.main:app`，不是斜杠路径 |
 | `Unknown database` / 数据表不存在 | 先创建数据库和表，检查 `.env` 库名 |
 | 缺少环境变量 | 根目录 `.env` 是否存在、变量名是否一致 |
