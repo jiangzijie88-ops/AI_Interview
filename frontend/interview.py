@@ -1,11 +1,13 @@
-from ui import difficulty_label, page_heading
+from ui import difficulty_label, page_heading, practice_intro
 import httpx
 import streamlit as st
 from uuid import uuid4  # 生成每次提交的唯一编号
 
 
 def show_interview_create(api_url, token):
-    page_heading("开始一场练习", "选择方向与难度，创建后即可逐题作答。")
+    practice_intro()
+    st.subheader("今天，练习什么？")
+    st.caption("先选岗位与难度，再确定本次练习的范围。")
 
     # 读取岗位和知识点，作为页面选项
     try:
@@ -35,6 +37,7 @@ def show_interview_create(api_url, token):
         return
 
     with st.form("interview_create_form"):
+        st.markdown("#### 练习设置")
         job_column, difficulty_column, count_column = st.columns([2, 1, 1])
         job_id = job_column.selectbox(
             "岗位",
@@ -58,21 +61,23 @@ def show_interview_create(api_url, token):
             help="不选表示不限；选多个时，题目匹配其中任意一个即可",
         )
 
-        submitted = st.form_submit_button("创建练习", type="primary")
+        st.caption("不选知识点表示不限范围。历史回答与点评可在「我的练习」回看。")
+        submitted = st.form_submit_button("创建练习", type="primary", width="stretch")
 
     if submitted:
         try:
-            response = httpx.post(
-                f"{api_url}/interview_sessions",
-                headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "job_role_id": job_id,
-                    "difficulty": difficulty,
-                    "question_count": question_count,
-                    "knowledge_point_ids": point_ids,
-                },
-                timeout=20.0,
-            )
+            with st.spinner("正在匹配题目并创建练习……"):
+                response = httpx.post(
+                    f"{api_url}/interview_sessions",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "job_role_id": job_id,
+                        "difficulty": difficulty,
+                        "question_count": question_count,
+                        "knowledge_point_ids": point_ids,
+                    },
+                    timeout=20.0,
+                )
 
             if response.status_code == 201:
                 data = response.json()

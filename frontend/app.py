@@ -34,7 +34,7 @@ if st.session_state.token is None:
                 password = st.text_input("密码", type="password")
 
                 # 表单内的输入集中在点击此按钮后提交
-                submitted = st.form_submit_button("登录")
+                submitted = st.form_submit_button("登录", type="primary", width="stretch")
 
             if submitted:
                 try:
@@ -94,7 +94,7 @@ if st.session_state.token is None:
                         key="register_nickname",
                     )
 
-                    register_submitted = st.form_submit_button("注册")
+                    register_submitted = st.form_submit_button("注册", type="primary", width="stretch")
 
                 # 表单提交后，再检查并发送请求
                 if register_submitted:
@@ -158,7 +158,7 @@ else:
 
     # 每轮读取服务端身份，管理入口不信任客户端保存的角色。
     with st.sidebar:
-        st.markdown("## AI 面试平台")
+        st.markdown('<div class="brand-mark"><strong>AI 面试练习</strong><p>从回答，到真正理解。</p></div>', unsafe_allow_html=True)
         if current_user is not None:
             st.caption(current_user.get("nickname") or current_user["username"])
         st.caption("练习工作台")
