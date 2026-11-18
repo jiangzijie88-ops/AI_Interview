@@ -196,42 +196,15 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 前端默认访问 `http://127.0.0.1:8000`。如需更改，在启动前端的终端设置 `$env:API_URL = "你的后端地址"`；前端不会自行读取根目录 `.env` 中的这个变量。
 
-### 4. 首次创建数据库与表
+### 4. 初始化数据库
 
-先启动 MySQL 服务，通过 SQLTools、MySQL Workbench 等工具连接并执行：
+使用 SQLTools 或 MySQL Workbench 连接 MySQL，按照 [数据库初始化说明](sql/README.md) 依次完整执行：
 
-```sql
-CREATE DATABASE IF NOT EXISTS ai_interview CHARACTER SET utf8mb4;
-```
+1. `sql/01_create_database.sql`
+2. `sql/02_create_tables.sql`
+3. `sql/03_seed_categories.sql`
 
-库名需与 `.env` 的 `DB_NAME` 一致。SQLTools 用于人工管理，后端会根据 `.env` 自行连接。
-
-后端启动不会自动建业务表，仓库也没有完整的建表 SQL 文件。**首次使用空数据库**时，可在 PowerShell 执行以下一次性命令，导入全部模型并创建表：
-
-```powershell
-@'
-import asyncio
-import importlib
-import pkgutil
-import backend.models
-from backend.database import Base, async_engine
-
-# 导入全部模型，让 Base 收集数据表定义。
-for module in pkgutil.iter_modules(backend.models.__path__):
-    importlib.import_module(f"backend.models.{module.name}")
-
-async def main():
-    try:
-        async with async_engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-    finally:
-        await async_engine.dispose()
-
-asyncio.run(main())
-'@ | python -
-```
-
-这只创建缺失的表，不会迁移已有表结构；升级旧数据库需另行核对字段。已有完整数据库的开发者无需执行。
+三个文件分别创建数据库、全部 15 张业务表、岗位与知识点分类。每个文件均有注释。首次使用空数据库时执行；已有数据库不要重复插入分类。库名需与 `.env` 的 `DB_NAME` 一致，初始化文件不用于迁移旧表结构。
 
 ### 5. 启动后端
 
@@ -274,25 +247,7 @@ python -m backend.init_admin
 
 示例题库使用数字 ID 关联分类。下面约定与示例文件对应，适用于新建的空数据库；已有数据应先检查编号，必要时调整 JSON，避免关联错误。
 
-```sql
-USE ai_interview;
-
-INSERT INTO job_roles (id, name) VALUES
-(1, 'Python 后端'),
-(2, 'AI 应用开发');
-
-INSERT INTO knowledge_points (id, name) VALUES
-(1, 'Python 基础'),
-(2, 'SQL 与 MySQL'),
-(3, 'FastAPI'),
-(4, 'Streamlit'),
-(5, 'LangChain'),
-(6, 'LangGraph'),
-(7, 'Agent 开发'),
-(8, 'RAG');
-```
-
-仅用于首次初始化，不需要重复执行。名称可调整，但示例题库中的编号必须对应。
+上面的数据库初始化第 3 步已准备分类，无需再次执行。具体编号见 [03_seed_categories.sql](sql/03_seed_categories.sql)。
 
 ### 导入并审核题目
 
